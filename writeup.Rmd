@@ -1,0 +1,236 @@
+
+ "Assignment Writeup"
+=====================
+
+**Parisa Tabrizi**
+
+**September 20, 2014**
+
+
+Loading Data
+========================================================
+
+In this section, We read the file using appropriate functions and load in the data using the following commands.
+
+```{r, echo=FALSE, cache.path= F, message=FALSE}
+library(caret)
+library(ggplot2)
+library(gbm)
+library(plyr)
+```
+
+
+```{r}
+trainingData <- read.csv("pml-training.csv")
+testingData <- read.csv("pml-testing.csv")
+
+```
+
+Cleaning Data
+=======================================================
+
+Now, we check how many columns have NA values in the training data and what is the quantity of NAvalues.
+
+
+```{r}
+sum(is.na(trainingData))  # Total NA values
+
+sum(is.na(trainingData[150,])) # NA values in a row
+```
+
+As there are many NA Values in the data,First we have to clean the dataset.
+I replaced the blank cells and NA values by “NA” and keep the columns which have no NA value.
+
+```{r}
+blank <- trainingData == ""
+
+trainingData [blank] <- NA
+
+selected_col <- trainingData[, colSums(is.na(trainingData))==0]
+
+dim(selected_col)
+
+```
+
+Now we have 60 columns.
+
+It seems that the first 7 columns are not considered to be predictors for Classe variable. So we can remove these columns.
+
+```{r}
+colnames(trainingData[,1:7])
+selected_col <- selected_col[,-c(1:7)]
+```
+
+Finally, We clean the test data just like the training data.
+
+
+```{r, echo=FALSE}
+
+non <- testingData[,] == ""
+
+testingData [non] <- NA
+selected_feature_test <- !is.na(testingData[1,]) 
+selected_testing <- subset(testingData, select = selected_feature_test)
+
+selected_testing <- subset(testingData, select = selected_feature_test)
+```
+
+
+Partitioning The Data
+=====================
+
+In order to have best performance in Accuracy and estimating the Out Sample Error,We split the Training Data into 60% for training purpose and 40% for cross validation. 
+
+```{r}
+set.seed(2014)
+inTrain <- createDataPartition( y=selected_col$classe , p= 0.6, list = F)
+training <- selected_col[inTrain,]
+testing <- selected_col[-inTrain,]
+
+```
+Exploratory Data Analysis
+=========================
+
+
+We look at the frequency plot for the classe variable.
+
+```{r fig.width=7, fig.height=6}
+
+plot(selected_col$classe,col=rainbow(5),main = "`classe` frequency plot")
+```
+
+
+
+Building Model
+==============
+
+Since this is a Classification problem and has different predictors with non-linear behavior, We train our data using **Gradient Boosting Machine (GBM)** and **Random Forest**.
+
+
+GBM Model
+---------
+
+In order to tune our GBM model, we use the function `expand.grid()` .
+After testing diffrent numbers for tuning parameters, We can obtain the best possible results.
+
+```{r, results='hide'}
+
+gbmGrid <-  expand.grid(interaction.depth = c( 4 , 8, 10),
+                        n.trees = c( 10 , 30 , 60),
+                        shrinkage = 0.3)
+
+```
+
+```{r, echo=FALSE}
+```
+
+For cross validation We use 8-fold cv with the following parameters.
+I decided to choose more than 5 fold to reduce the bias.
+
+```{r}
+contorol = trainControl(method = "cv", number = 8 ,allowParallel = TRUE)
+
+```
+
+Now, we can fit GBM model.
+
+```{r, results='hide'}
+modelFit_GBM <- train(classe ~ .,method="gbm", data = training,tuneGrid=gbmGrid , trControl = contorol)
+
+```
+
+```{r, results='markup'}
+modelFit_GBM
+```
+
+```{r}
+trellis.par.set(caretTheme())
+plot(modelFit_GBM)
+```
+
+As we see in the above plot and the summary of the model, there are diffrent numbers to tune the model base on *the number of trees (`n.trees`)* & *the complexity of the tree (`interaction.depth`)*  inorder to obtain a good accuracy.
+
+
+Random Forest Model
+-------------------
+
+For RF Model
+```{r, message= FALSE,tidy=TRUE}
+
+modelFit_RF <- train(classe ~ ., data = training,
+               method = "rf", ntree= 50 , 
+               importance = T, 
+               trControl = contorol)
+
+```
+
+```{r}
+modelFit_RF
+```
+
+
+```{r}
+plot(modelFit_RF)
+```
+
+Differences Between Models
+--------------------------
+
+We look at the differences between models via their resampling distributions.To do this,first We collect the resampling results using `resamples()` function .
+
+```{r,fig.width=7, fig.height=6}
+
+resamps <- resamples(list(GBM = modelFit_GBM,
+               RF = modelFit_RF))
+
+```
+
+To visualize the resampling distributions we use box-whiskerplot.
+
+```{r, echo=FALSE}
+bwplot(resamps, layout = c(3, 1))
+
+```
+
+The *In Sample error* for both models seems to be similar. Although the accuracy of the models are high (more than 0.98) we might be overfitted to the training data. So we have to test our models on the testing set.
+
+
+Out Sample Error
+=================
+
+Then we use each model to predict the Testing data (40% of total Data) and calculate the out sample error.
+
+```{r, echo=FALSE}
+testing_pred_GBM <- predict(modelFit_GBM, testing)
+confusion_GBM <- confusionMatrix(testing_pred_GBM, testing$classe)
+
+testing_pred_RF <- predict(modelFit_RF, testing)
+confusion_RF <- confusionMatrix(testing_pred_RF, testing$classe)
+
+
+```
+
+The confusion matrix for our GBM model is:
+
+```{r, echo=FALSE}
+confusion_GBM
+```
+
+The confusion matrix for our RF model is:
+
+```{r, echo=FALSE}
+
+confusion_RF
+
+```
+
+
+We also obtained a really good accuracy in **Out Sample error** based on the statistics we obtained above.
+
+
+
+Submission
+==========
+
+Because of the higher out sample Accuracy, I choose the GBM to predict the assignment test data. Finally, I get 20/20 from the assignment.
+
